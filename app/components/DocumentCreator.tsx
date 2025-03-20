@@ -90,33 +90,50 @@ export const DocumentCreator: React.FC = () => {
       const promptGenerator = DOCUMENT_PROMPTS[documentType as keyof typeof DOCUMENT_PROMPTS];
       const prompt = promptGenerator(formData.title, formData.additionalDetails || 'Standard terms');
       
-      // Call LLM API to generate document
-      const response = await fetch('/api/generate-document', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          prompt,
-          documentType,
-          title: formData.title
-        }),
-      });
+      // Create AbortController for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 45000); // 45 second timeout
       
-      if (!response.ok) {
-        throw new Error('Failed to generate document. API returned an error.');
+      try {
+        // Call LLM API to generate document
+        const response = await fetch('/api/generate-document', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ 
+            prompt,
+            documentType,
+            title: formData.title
+          }),
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+          throw new Error(`Failed to generate document: ${errorData.error || response.statusText}`);
+        }
+        
+        const data = await response.json();
+        const generatedText = data.content;
+        
+        // Update form with AI-generated content
+        setGeneratedContent(generatedText);
+        setFormData(prev => ({
+          ...prev,
+          description: `AI-generated ${DOCUMENT_TYPES.find(type => type.id === documentType)?.name} with standard legal provisions based on the provided details.`
+        }));
+      } catch (fetchError: any) {
+        clearTimeout(timeoutId);
+        
+        if (fetchError.name === 'AbortError') {
+          throw new Error('Document generation timed out. The server took too long to respond.');
+        }
+        throw fetchError;
       }
-      
-      const data = await response.json();
-      const generatedText = data.content;
-      
-      // Update form with AI-generated content
-      setGeneratedContent(generatedText);
-      setFormData(prev => ({
-        ...prev,
-        description: `AI-generated ${DOCUMENT_TYPES.find(type => type.id === documentType)?.name} with standard legal provisions based on the provided details.`
-      }));
-    } catch (err) {
+    } catch (err: any) {
       console.error('AI generation error:', err);
       // Fallback to simpler generation if API fails
       setFormData(prev => ({
@@ -126,7 +143,7 @@ export const DocumentCreator: React.FC = () => {
         } titled "${formData.title}". It includes standard clauses and protections for both parties.`
       }));
       
-      setError(new Error('Failed to generate complete document with AI. Using simplified draft instead.'));
+      setError(new Error(`Failed to generate complete document with AI: ${err.message || 'Unknown error'}. Using simplified draft instead.`));
     } finally {
       setLoading(false);
     }
@@ -162,31 +179,83 @@ export const DocumentCreator: React.FC = () => {
           const promptGenerator = DOCUMENT_PROMPTS[documentType as keyof typeof DOCUMENT_PROMPTS];
           const prompt = promptGenerator(formData.title, formData.additionalDetails || 'Standard terms');
           
-          // Call LLM API to generate document
-          const response = await fetch('/api/generate-document', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ 
-              prompt,
-              documentType,
-              title: formData.title
-            }),
-          });
+          // Create AbortController for timeout
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 45000); // 45 second timeout
           
-          if (!response.ok) {
-            throw new Error('Failed to generate document. API returned an error.');
+          try {
+            // Call LLM API to generate document
+            const response = await fetch('/api/generate-document', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ 
+                prompt,
+                documentType,
+                title: formData.title
+              }),
+              signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
+            
+            if (!response.ok) {
+              const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+              throw new Error(`Failed to generate document: ${errorData.error || response.statusText}`);
+            }
+            
+            const data = await response.json();
+            
+            // Check if we got a diagnostic error
+            if (data.diagnostic && data.diagnostic.isTimeout) {
+              console.warn('Using fallback template due to API timeout');
+            }
+            
+            setGeneratedContent(data.content);
+          } catch (fetchError: any) {
+            clearTimeout(timeoutId);
+            
+            if (fetchError.name === 'AbortError') {
+              throw new Error('Document generation timed out. The server took too long to respond.');
+            }
+            throw fetchError;
           }
-          
-          const data = await response.json();
-          setGeneratedContent(data.content);
-        } catch (err) {
+        } catch (err: any) {
           console.error('Document generation error:', err);
-          setError(new Error('Failed to generate complete document with LLM. Please try again or generate draft first.'));
-          setIsGeneratingFullDocument(false);
-          setLoading(false);
-          return;
+          
+          // If the error is related to timeout, use a fallback template
+          if (err.message && (err.message.includes('timed out') || err.message.includes('timeout'))) {
+            console.log('Using fallback template due to timeout');
+            const docType = formData.type;
+            const templateText = `[USING FALLBACK TEMPLATE - AI GENERATION TIMED OUT]\n\n`;
+            
+            // Get the appropriate default template
+            const fallbackTemplateRequest = await fetch('/api/generate-document', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                prompt: "Use fallback template",
+                documentType: docType,
+                title: formData.title
+              }),
+            });
+            
+            if (fallbackTemplateRequest.ok) {
+              const templateData = await fallbackTemplateRequest.json();
+              setGeneratedContent(templateText + templateData.content);
+            } else {
+              setError(new Error('Failed to generate document. Please try with a simpler request or try again later.'));
+              setIsGeneratingFullDocument(false);
+              setLoading(false);
+              return;
+            }
+          } else {
+            setError(new Error(`Failed to generate document: ${err.message || 'Unknown error'}`));
+            setIsGeneratingFullDocument(false);
+            setLoading(false);
+            return;
+          }
         }
       }
       
@@ -205,9 +274,9 @@ export const DocumentCreator: React.FC = () => {
       
       console.log('Document created with ID:', documentId);
       router.push(`/dashboard/documents/${documentId}`);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Document creation error:', err);
-      setError(err instanceof Error ? err : new Error('Failed to create document. Please try again.'));
+      setError(err instanceof Error ? err : new Error(`Failed to create document: ${err?.message || 'Unknown error'}`));
     } finally {
       setIsGeneratingFullDocument(false);
       setLoading(false);

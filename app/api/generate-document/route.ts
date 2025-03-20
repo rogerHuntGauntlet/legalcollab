@@ -31,36 +31,52 @@ async function callLLMAPI(prompt: string, isRewrite: boolean = false, isPartialR
       systemPrompt = SYSTEM_PROMPTS.default;
     }
 
-    const response = await fetch(LLM_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${LLM_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: LLM_MODEL,
-        messages: [
-          {
-            role: 'system', 
-            content: systemPrompt
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        temperature: isPartialRewrite ? 0.3 : isRewrite ? 0.7 : 0.2, // Different temperature for different tasks
-        max_tokens: isPartialRewrite ? 1000 : 4000
-      })
-    });
+    // Create AbortController for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(`LLM API error: ${errorData.error?.message || response.statusText}`);
+    try {
+      const response = await fetch(LLM_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${LLM_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: LLM_MODEL,
+          messages: [
+            {
+              role: 'system', 
+              content: systemPrompt
+            },
+            {
+              role: 'user',
+              content: prompt
+            }
+          ],
+          temperature: isPartialRewrite ? 0.3 : isRewrite ? 0.7 : 0.2, // Different temperature for different tasks
+          max_tokens: isPartialRewrite ? 1000 : 4000
+        }),
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId); // Clear timeout if request completes
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: { message: `HTTP error ${response.status}` } }));
+        throw new Error(`LLM API error: ${errorData.error?.message || response.statusText}`);
+      }
+
+      const data = await response.json();
+      return data.choices[0].message.content.trim();
+    } catch (fetchError: any) {
+      if (fetchError.name === 'AbortError') {
+        throw new Error('LLM API request timed out after 30 seconds');
+      }
+      throw fetchError;
+    } finally {
+      clearTimeout(timeoutId); // Ensure timeout is cleared
     }
-
-    const data = await response.json();
-    return data.choices[0].message.content.trim();
   } catch (error) {
     console.error('Error calling LLM API:', error);
     throw error;
@@ -220,11 +236,16 @@ export async function POST(request: NextRequest) {
     }
     
     let content;
+    let diagnostic = null;
     
     // Try to call the LLM API
     try {
       content = await callLLMAPI(prompt, isRewrite, isPartialRewrite);
-    } catch (error) {
+    } catch (error: any) {
+      diagnostic = {
+        message: error.message || 'Unknown error',
+        isTimeout: error.message?.includes('timed out') || false
+      };
       console.error('Error generating document with LLM:', error);
       
       // Fallback to template if LLM fails (only for full documents)
@@ -238,20 +259,24 @@ export async function POST(request: NextRequest) {
         }
         
         // Add warning about fallback template
-        content = `[USING FALLBACK TEMPLATE - LLM GENERATION FAILED]\n\n${content}`;
+        content = `[USING FALLBACK TEMPLATE - LLM GENERATION FAILED: ${diagnostic.message}]\n\n${content}`;
       } else {
         // For partial rewrites, return original text with error note
-        content = `[AI REWRITE FAILED] ${prompt.substring(0, 100)}...`;
+        content = `[AI REWRITE FAILED: ${diagnostic.message}] ${prompt.substring(0, 100)}...`;
       }
     }
     
-    return NextResponse.json({ content });
-  } catch (error) {
+    return NextResponse.json({ 
+      content,
+      diagnostic
+    });
+  } catch (error: any) {
     console.error('API route error:', error);
     return NextResponse.json(
       { 
         error: 'Failed to generate document', 
-        message: error instanceof Error ? error.message : 'Unknown error' 
+        message: error.message || 'Unknown error',
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
       },
       { status: 500 }
     );

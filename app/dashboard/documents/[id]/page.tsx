@@ -130,39 +130,56 @@ export default function DocumentDetails() {
       const documentType = document.type;
       const prompt = rewritePrompt || `Rewrite the ${getDocumentTypeLabel(documentType)} titled "${document.title}" with a different approach and structure. Maintain the same general purpose but improve clarity, reduce ambiguity, and strengthen legal protections. Include all standard sections appropriate for this type of document.`;
       
-      const response = await fetch('/api/generate-document', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          prompt,
-          documentType,
-          title: document.title,
-          isRewrite: true
-        }),
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to rewrite document. API returned an error.');
+      // Create AbortController for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 45000); // 45 second timeout
+
+      try {
+        const response = await fetch('/api/generate-document', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ 
+            prompt,
+            documentType,
+            title: document.title,
+            isRewrite: true
+          }),
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+          throw new Error(`Failed to rewrite document: ${errorData.error || response.statusText}`);
+        }
+        
+        const data = await response.json();
+        const rewrittenContent = data.content;
+        
+        // Update document in Firestore
+        await updateDocument(documentId, {
+          fullContent: rewrittenContent,
+          description: document.description + ' (AI Rewritten)'
+        });
+        
+        // Refresh document data
+        const refreshedDoc = await getDocument(documentId);
+        setDocument(refreshedDoc);
+        setShowRewriteModal(false);
+      } catch (fetchError: any) {
+        clearTimeout(timeoutId);
+        
+        if (fetchError.name === 'AbortError') {
+          throw new Error('Document rewrite timed out. Please try again with a simpler request.');
+        }
+        throw fetchError;
       }
-      
-      const data = await response.json();
-      const rewrittenContent = data.content;
-      
-      // Update document in Firestore
-      await updateDocument(documentId, {
-        fullContent: rewrittenContent,
-        description: document.description + ' (AI Rewritten)'
-      });
-      
-      // Refresh document data
-      const refreshedDoc = await getDocument(documentId);
-      setDocument(refreshedDoc);
-      setShowRewriteModal(false);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Document rewrite error:', err);
-      setError('Failed to rewrite document. Please try again later.');
+      setError(`Failed to rewrite document: ${err.message || 'Unknown error'}. Please try again later.`);
     } finally {
       setIsRewriting(false);
     }
@@ -185,35 +202,79 @@ export default function DocumentDetails() {
       if (saveInstructions.trim()) {
         setIsRewritingSection(true);
         
-        const response = await fetch('/api/generate-document', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ 
-            prompt: `Revise the following document according to these instructions: "${saveInstructions}".\n\nDOCUMENT:\n${editedContent}`,
-            documentType: document.type,
-            title: document.title,
-            isRewrite: true
-          }),
-        });
+        // Create AbortController for timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 45000); // 45 second timeout
         
-        if (!response.ok) {
-          throw new Error('Failed to process document with AI. Changes will be saved as-is.');
+        try {
+          const response = await fetch('/api/generate-document', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ 
+              prompt: `Revise the following document according to these instructions: "${saveInstructions}".\n\nDOCUMENT:\n${editedContent}`,
+              documentType: document.type,
+              title: document.title,
+              isRewrite: true
+            }),
+            signal: controller.signal
+          });
+          
+          clearTimeout(timeoutId);
+          
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+            
+            // If it fails, save the content as-is but inform the user
+            console.warn('Failed to process with AI. Saving changes as-is.');
+            await updateDocument(documentId, {
+              fullContent: editedContent,
+              description: document.description + ' (Edited)'
+            });
+            
+            // Refresh document data
+            const refreshedDoc = await getDocument(documentId);
+            setDocument(refreshedDoc);
+            setError(`AI processing failed: ${errorData.error || response.statusText}. Changes saved as-is.`);
+            setIsEditing(false);
+            setSaveInstructions('');
+            return;
+          }
+          
+          const data = await response.json();
+          const improvedContent = data.content;
+          
+          // Update document with AI-improved content
+          await updateDocument(documentId, {
+            fullContent: improvedContent,
+            description: document.description + ' (AI Enhanced)'
+          });
+          
+          // Refresh document data
+          const refreshedDoc = await getDocument(documentId);
+          setDocument(refreshedDoc);
+        } catch (fetchError: any) {
+          clearTimeout(timeoutId);
+          
+          if (fetchError.name === 'AbortError') {
+            console.warn('AI processing timed out. Saving content as-is.');
+            // Save the original edited content without AI processing
+            await updateDocument(documentId, {
+              fullContent: editedContent,
+              description: document.description + ' (Edited)'
+            });
+            
+            // Refresh document data and show a warning
+            const refreshedDoc = await getDocument(documentId);
+            setDocument(refreshedDoc);
+            setError('AI processing timed out. Your changes have been saved without AI enhancements.');
+            setIsEditing(false);
+            setSaveInstructions('');
+            return;
+          }
+          throw fetchError;
         }
-        
-        const data = await response.json();
-        const improvedContent = data.content;
-        
-        // Update document with AI-improved content
-        await updateDocument(documentId, {
-          fullContent: improvedContent,
-          description: document.description + ' (AI Enhanced)'
-        });
-        
-        // Refresh document data
-        const refreshedDoc = await getDocument(documentId);
-        setDocument(refreshedDoc);
       } else {
         // Save changes without AI processing
         await updateDocument(documentId, {
@@ -229,9 +290,9 @@ export default function DocumentDetails() {
       // Reset states
       setIsEditing(false);
       setSaveInstructions('');
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error saving document:', err);
-      setError('Failed to save changes. Please try again later.');
+      setError(`Failed to save changes: ${err.message || 'Unknown error'}. Please try again later.`);
     } finally {
       setIsRewritingSection(false);
     }
@@ -287,39 +348,55 @@ export default function DocumentDetails() {
         ? `Rewrite the following text according to these instructions: "${selectionInstructions}".` 
         : `Rewrite the following text to improve clarity, precision, and legal robustness while maintaining its original meaning:`;
       
-      // Call LLM API to rewrite selected portion
-      const response = await fetch('/api/generate-document', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          prompt: `${instructionPrefix} "${selectedText}"`,
-          documentType: document.type,
-          title: document.title,
-          isRewrite: true,
-          isPartialRewrite: true
-        }),
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to rewrite selection. API returned an error.');
+      // Create AbortController for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
+      try {
+        // Call LLM API to rewrite selected portion
+        const response = await fetch('/api/generate-document', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ 
+            prompt: `${instructionPrefix} "${selectedText}"`,
+            documentType: document.type,
+            title: document.title,
+            isRewrite: true,
+            isPartialRewrite: true
+          }),
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+          throw new Error(`Failed to rewrite selection: ${errorData.error || response.statusText}`);
+        }
+        
+        const data = await response.json();
+        const rewrittenSection = data.content;
+        
+        // Replace the selected text in the edited content
+        const before = editedContent.substring(0, selectionRange.start);
+        const after = editedContent.substring(selectionRange.end);
+        setEditedContent(before + rewrittenSection + after);
+        
+        // Reset selection instructions for next use
+        setSelectionInstructions('');
+      } catch (fetchError: any) {
+        clearTimeout(timeoutId);
+        
+        if (fetchError.name === 'AbortError') {
+          throw new Error('Rewrite timed out. Please try a smaller selection or simpler instructions.');
+        }
+        throw fetchError;
       }
-      
-      const data = await response.json();
-      const rewrittenSection = data.content;
-      
-      // Replace the selected text in the edited content
-      const before = editedContent.substring(0, selectionRange.start);
-      const after = editedContent.substring(selectionRange.end);
-      setEditedContent(before + rewrittenSection + after);
-      
-      // Reset selection instructions for next use
-      setSelectionInstructions('');
-      
-    } catch (err) {
-      console.error('Selection rewrite error:', err);
-      setError('Failed to rewrite selection. Please try again later.');
+    } catch (err: any) {
+      console.error('Section rewrite error:', err);
+      setError(`Failed to rewrite selection: ${err.message || 'Unknown error'}`);
     } finally {
       setIsRewritingSection(false);
     }
