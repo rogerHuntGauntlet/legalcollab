@@ -2,6 +2,9 @@
   "name": "legal_collab",
   "version": "1.0.0",
   "description": "This repository contains the Product Requirements Document (PRD) for the Legal Agreement Collaboration Platform. This platform is a Next.js web application that enables users to create, negotiate, and finalize legal agreements with AI assistance.",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "main": "index.js",
   "scripts": {
     "dev": "next dev",
