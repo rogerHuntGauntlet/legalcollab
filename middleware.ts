@@ -2,32 +2,32 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 export function middleware(request: NextRequest) {
-  // Middleware for route protection
-  const path = request.nextUrl.pathname;
+  // Clone the request headers
+  const requestHeaders = new Headers(request.headers);
   
-  // Public paths that don't require authentication
-  const isPublicPath = 
-    path === '/login' || 
-    path === '/' || 
-    path.startsWith('/_next') || 
-    path.includes('/api/');
+  // Add request ID header for tracing
+  requestHeaders.set('x-request-id', crypto.randomUUID());
   
-  // Check if user is authenticated (in a real implementation, this would check cookies/session)
-  // For this demo we'll handle auth in the client components
+  // Get response for the request
+  const response = NextResponse.next({
+    request: {
+      headers: requestHeaders,
+    },
+  });
   
-  return NextResponse.next();
+  // Add security headers
+  response.headers.set('X-Content-Type-Options', 'nosniff');
+  response.headers.set('X-Frame-Options', 'DENY');
+  response.headers.set('X-XSS-Protection', '1; mode=block');
+  response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  
+  return response;
 }
 
-// Configure the middleware to run on specific paths
+// Match all API routes and page routes
 export const config = {
   matcher: [
-    /*
-     * Match all request paths except for the ones starting with:
-     * - api (API routes)
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     */
-    '/((?!api|_next/static|_next/image|favicon.ico).*)',
+    '/api/:path*',
+    '/((?!_next/static|_next/image|favicon.ico).*)',
   ],
 }; 

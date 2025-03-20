@@ -15,31 +15,39 @@ export async function GET(request: NextRequest) {
       );
     }
     
-    // Get document from Firestore
-    const document = await getDocument(documentId);
-    
-    if (!document) {
+    try {
+      // Get document from Firestore
+      const document = await getDocument(documentId);
+      
+      if (!document) {
+        return NextResponse.json(
+          { error: 'Document not found' },
+          { status: 404 }
+        );
+      }
+      
+      // In a real implementation, you would:
+      // 1. Generate a PDF from the document content
+      // 2. Return the PDF as a response
+      
+      // For now, we'll just return the document content as text with appropriate headers
+      const fileName = `${document.title.replace(/\s+/g, '_')}.txt`;
+      const content = document.fullContent || 'No content available';
+      
+      // Return the content with headers for download
+      return new NextResponse(content, {
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Content-Disposition': `attachment; filename="${fileName}"`,
+        },
+      });
+    } catch (dbError) {
+      console.error('Error retrieving document from Firestore:', dbError);
       return NextResponse.json(
-        { error: 'Document not found' },
-        { status: 404 }
+        { error: 'Failed to retrieve document from database' },
+        { status: 500 }
       );
     }
-    
-    // In a real implementation, you would:
-    // 1. Generate a PDF from the document content
-    // 2. Return the PDF as a response
-    
-    // For now, we'll just return the document content as text with appropriate headers
-    const fileName = `${document.title.replace(/\s+/g, '_')}.txt`;
-    const content = document.fullContent || 'No content available';
-    
-    // Return the content with headers for download
-    return new NextResponse(content, {
-      headers: {
-        'Content-Type': 'text/plain; charset=utf-8',
-        'Content-Disposition': `attachment; filename="${fileName}"`,
-      },
-    });
     
     // Production Implementation would look something like:
     /*

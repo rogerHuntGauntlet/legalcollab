@@ -249,7 +249,10 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('API route error:', error);
     return NextResponse.json(
-      { error: 'Failed to generate document' },
+      { 
+        error: 'Failed to generate document', 
+        message: error instanceof Error ? error.message : 'Unknown error' 
+      },
       { status: 500 }
     );
   }

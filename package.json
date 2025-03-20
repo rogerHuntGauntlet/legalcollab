@@ -10,7 +10,8 @@
     "dev": "next dev",
     "build": "cross-env NODE_ENV=production next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "postinstall": "npm install --save-exact @babel/core@latest babel-loader@latest"
   },
   "keywords": [],
   "author": "",

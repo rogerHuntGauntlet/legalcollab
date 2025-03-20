@@ -24,25 +24,20 @@ let firebaseApp: FirebaseApp;
 let firebaseAuth: Auth;
 let firebaseDb: Firestore;
 
-// Check if we're in the browser environment
-if (typeof window !== 'undefined') {
-  try {
-    if (!getApps().length) {
-      firebaseApp = initializeApp(firebaseConfig);
-      console.log('Firebase initialized for the first time');
-    } else {
-      firebaseApp = getApps()[0];
-      console.log('Using existing Firebase app');
-    }
-    
-    firebaseAuth = getAuth(firebaseApp);
-    firebaseDb = getFirestore(firebaseApp);
-    console.log('Firebase auth and Firestore initialized');
-  } catch (error) {
-    console.error('Error initializing Firebase:', error);
+try {
+  if (!getApps().length) {
+    firebaseApp = initializeApp(firebaseConfig);
+    console.log('Firebase initialized for the first time');
+  } else {
+    firebaseApp = getApps()[0];
+    console.log('Using existing Firebase app');
   }
-} else {
-  console.log('Skipping Firebase initialization in server environment');
+  
+  firebaseAuth = getAuth(firebaseApp);
+  firebaseDb = getFirestore(firebaseApp);
+  console.log('Firebase auth and Firestore initialized');
+} catch (error) {
+  console.error('Error initializing Firebase:', error);
 }
 
 // Export the initialized services
