@@ -25,6 +25,7 @@ export interface DocumentFormData {
   description: string;
   counterpartyEmail: string;
   additionalDetails: string;
+  template?: string;
   fullContent?: string;
 }
 

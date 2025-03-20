@@ -8,6 +8,12 @@ export function middleware(request: NextRequest) {
   // Add request ID header for tracing
   requestHeaders.set('x-request-id', crypto.randomUUID());
   
+  // Add timeout header for API routes
+  if (request.nextUrl.pathname.startsWith('/api/')) {
+    // Set a generous API timeout but still with a limit
+    requestHeaders.set('x-api-timeout', '30000'); // 30 seconds
+  }
+  
   // Get response for the request
   const response = NextResponse.next({
     request: {
@@ -20,6 +26,11 @@ export function middleware(request: NextRequest) {
   response.headers.set('X-Frame-Options', 'DENY');
   response.headers.set('X-XSS-Protection', '1; mode=block');
   response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  
+  // Set max-age cache header for static assets
+  if (request.nextUrl.pathname.includes('/_next/static')) {
+    response.headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+  }
   
   return response;
 }

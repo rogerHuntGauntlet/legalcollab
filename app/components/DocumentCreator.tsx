@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../contexts/AuthContext';
-import { createDocument, DocumentFormData } from '../firebase/firestore';
+import { createDocument, DocumentFormData, updateDocument } from '../firebase/firestore';
 import ErrorHandler from './ErrorHandler';
 import { db } from '../firebase/config';
 
@@ -16,22 +16,51 @@ const DOCUMENT_TYPES = [
   { id: 'tos', name: 'Terms of Service' }
 ];
 
-// Sample prompts for each document type
+// Define available templates for each document type
+const DOCUMENT_TEMPLATES = {
+  nda: [
+    { id: 'standard', name: 'Standard NDA (Mutual)' },
+    { id: 'one-way', name: 'One-Way NDA' },
+    { id: 'startup', name: 'Startup-friendly NDA' }
+  ],
+  contract: [
+    { id: 'basic', name: 'Basic Service Agreement' },
+    { id: 'detailed', name: 'Detailed Service Contract' },
+    { id: 'milestone', name: 'Milestone-Based Contract' }
+  ],
+  employment: [
+    { id: 'full-time', name: 'Full-Time Employment' },
+    { id: 'contractor', name: 'Independent Contractor' },
+    { id: 'consultant', name: 'Consulting Agreement' }
+  ],
+  partnership: [
+    { id: 'general', name: 'General Partnership' },
+    { id: 'limited', name: 'Limited Partnership' },
+    { id: 'joint-venture', name: 'Joint Venture' }
+  ],
+  tos: [
+    { id: 'website', name: 'Website Terms of Service' },
+    { id: 'app', name: 'Mobile App Terms of Service' },
+    { id: 'saas', name: 'SaaS Terms of Service' }
+  ]
+};
+
+// Sample prompts for each document type - made more concise
 const DOCUMENT_PROMPTS = {
   nda: (title: string, details: string) => 
-    `Generate a comprehensive Non-Disclosure Agreement titled "${title}" with the following details: ${details}. Include standard clauses for confidentiality, term, obligations, exclusions, and remedies. Format it as a professional legal document with numbered sections.`,
+    `Create a Non-Disclosure Agreement titled "${title}". Details: ${details}. Include confidentiality, term, obligations, exclusions.`,
   
   contract: (title: string, details: string) => 
-    `Generate a detailed Service Contract titled "${title}" with the following specifications: ${details}. Include sections for scope of work, payment terms, timeline, deliverables, warranties, limitations of liability, and termination conditions. Format as a professional legal document with numbered sections.`,
+    `Create a Service Contract titled "${title}". Details: ${details}. Include scope, payment terms, deliverables, and termination.`,
   
   employment: (title: string, details: string) => 
-    `Generate a comprehensive Employment Agreement titled "${title}" with these details: ${details}. Include sections for role responsibilities, compensation, benefits, work hours, confidentiality, intellectual property, termination conditions, and non-compete clauses. Format as a professional legal document with numbered sections.`,
+    `Create an Employment Agreement titled "${title}". Details: ${details}. Include role, compensation, benefits, IP rights.`,
   
   partnership: (title: string, details: string) => 
-    `Generate a detailed Partnership Agreement titled "${title}" with these specifications: ${details}. Include sections for partnership structure, capital contributions, profit/loss sharing, management responsibilities, decision making, dispute resolution, and dissolution procedures. Format as a professional legal document with numbered sections.`,
+    `Create a Partnership Agreement titled "${title}". Details: ${details}. Include structure, contributions, profit sharing, dissolution.`,
   
   tos: (title: string, details: string) => 
-    `Generate comprehensive Terms of Service titled "${title}" with these requirements: ${details}. Include sections for service description, user obligations, intellectual property, prohibited activities, warranties, limitations of liability, dispute resolution, and modification terms. Format as a professional legal document with numbered sections.`
+    `Create Terms of Service titled "${title}". Details: ${details}. Include user obligations, IP, limitations of liability.`
 };
 
 export const DocumentCreator: React.FC = () => {
@@ -43,12 +72,19 @@ export const DocumentCreator: React.FC = () => {
   const [isFirestoreReady, setIsFirestoreReady] = useState(false);
   const [isGeneratingFullDocument, setIsGeneratingFullDocument] = useState(false);
   const [generatedContent, setGeneratedContent] = useState<string>('');
+  const [availableTemplates, setAvailableTemplates] = useState<Array<{id: string, name: string}>>(
+    DOCUMENT_TEMPLATES.nda
+  );
+  const [draftSaved, setDraftSaved] = useState(false);
+  const [draftId, setDraftId] = useState<string | null>(null);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [formData, setFormData] = useState<DocumentFormData>({
     title: '',
     type: DOCUMENT_TYPES[0].id,
     description: '',
     counterpartyEmail: '',
-    additionalDetails: ''
+    additionalDetails: '',
+    template: DOCUMENT_TEMPLATES.nda[0].id
   });
 
   // Check if Firestore is ready
@@ -75,7 +111,19 @@ export const DocumentCreator: React.FC = () => {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    
+    // If document type changed, update available templates and select the first one
+    if (name === 'type') {
+      const templates = DOCUMENT_TEMPLATES[value as keyof typeof DOCUMENT_TEMPLATES] || [];
+      setAvailableTemplates(templates);
+      setFormData(prev => ({ 
+        ...prev, 
+        [name]: value,
+        template: templates.length > 0 ? templates[0].id : ''
+      }));
+    } else {
+      setFormData(prev => ({ ...prev, [name]: value }));
+    }
   };
 
   const generateDraftWithAI = async () => {
@@ -85,10 +133,19 @@ export const DocumentCreator: React.FC = () => {
     try {
       setShowAIAssistance(true);
       
-      // Get the appropriate prompt based on document type
+      // Get the appropriate prompt based on document type and template
       const documentType = formData.type;
+      const templateId = formData.template;
       const promptGenerator = DOCUMENT_PROMPTS[documentType as keyof typeof DOCUMENT_PROMPTS];
-      const prompt = promptGenerator(formData.title, formData.additionalDetails || 'Standard terms');
+      let prompt = promptGenerator(formData.title, formData.additionalDetails || 'Standard terms');
+      
+      // Add template information to the prompt
+      if (templateId) {
+        const selectedTemplate = availableTemplates.find(t => t.id === templateId);
+        if (selectedTemplate) {
+          prompt += ` Use the ${selectedTemplate.name} template.`;
+        }
+      }
       
       // Create AbortController for timeout
       const controller = new AbortController();
@@ -283,6 +340,54 @@ export const DocumentCreator: React.FC = () => {
     }
   };
 
+  // Save the current form as a draft
+  const saveDraft = async () => {
+    if (!user) {
+      setError(new Error('You must be logged in to save a draft'));
+      return;
+    }
+    
+    setIsSavingDraft(true);
+    setError(null);
+    
+    try {
+      // Prepare draft data
+      const draftData: DocumentFormData = {
+        ...formData,
+        description: formData.description || `Draft document created on ${new Date().toLocaleDateString()}`,
+        fullContent: generatedContent || ''
+      };
+      
+      let savedDraftId: string;
+      
+      // If we have an existing draft, update it
+      if (draftId) {
+        await updateDocument(draftId, draftData);
+        savedDraftId = draftId;
+      } else {
+        // Create a new draft document
+        savedDraftId = await createDocument(
+          user.uid,
+          user.email,
+          draftData
+        );
+        setDraftId(savedDraftId);
+      }
+      
+      setDraftSaved(true);
+      
+      // Show success message briefly
+      setTimeout(() => {
+        setDraftSaved(false);
+      }, 3000);
+    } catch (err: any) {
+      console.error('Draft saving error:', err);
+      setError(err instanceof Error ? err : new Error(`Failed to save draft: ${err?.message || 'Unknown error'}`));
+    } finally {
+      setIsSavingDraft(false);
+    }
+  };
+
   return (
     <div className="max-w-3xl p-6 mx-auto bg-white rounded-lg shadow-md">
       <h2 className="mb-6 text-2xl font-bold text-gray-800">Create New Legal Document</h2>
@@ -292,6 +397,12 @@ export const DocumentCreator: React.FC = () => {
       {!isFirestoreReady && (
         <div className="p-4 mb-6 text-yellow-700 bg-yellow-100 border-l-4 border-yellow-500 rounded-md">
           <p>Database connection is being established. This may take a moment...</p>
+        </div>
+      )}
+      
+      {draftSaved && (
+        <div className="p-4 mb-6 text-green-700 bg-green-100 border-l-4 border-green-500 rounded-md animate-fadeOut">
+          <p>Draft saved successfully! You can continue editing.</p>
         </div>
       )}
       
@@ -330,6 +441,29 @@ export const DocumentCreator: React.FC = () => {
               </option>
             ))}
           </select>
+        </div>
+        
+        <div>
+          <label htmlFor="template" className="block mb-2 text-sm font-medium text-gray-700">
+            Document Template
+          </label>
+          <select
+            id="template"
+            name="template"
+            value={formData.template}
+            onChange={handleChange}
+            required
+            className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+          >
+            {availableTemplates.map(template => (
+              <option key={template.id} value={template.id}>
+                {template.name}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-sm text-gray-500">
+            Select a template that best fits your needs. The AI will customize it based on your details.
+          </p>
         </div>
         
         <div>
@@ -381,6 +515,15 @@ export const DocumentCreator: React.FC = () => {
               className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-purple-600 border border-transparent rounded-md shadow-sm hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50"
             >
               {loading && !isGeneratingFullDocument ? 'Generating Preview...' : 'Generate Preview'}
+            </button>
+            
+            <button
+              type="button"
+              onClick={saveDraft}
+              disabled={loading || isSavingDraft || !formData.title || !formData.type}
+              className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-md shadow-sm hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50"
+            >
+              {isSavingDraft ? 'Saving...' : draftId ? 'Update Draft' : 'Save as Draft'}
             </button>
             
             <button

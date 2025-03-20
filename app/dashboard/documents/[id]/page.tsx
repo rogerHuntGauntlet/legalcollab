@@ -3,11 +3,12 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '../../../contexts/AuthContext';
-import { getDocument, updateDocument, DocumentData, addSignatureToDocument, hasUserSignedDocument } from '../../../firebase/firestore';
+import { getDocument, updateDocument, DocumentData, addSignatureToDocument, hasUserSignedDocument, addCollaborator } from '../../../firebase/firestore';
 import { serverTimestamp } from 'firebase/firestore';
 import Link from 'next/link';
 import LoadingIndicator from '../../../components/LoadingIndicator';
 import SignatureModal from '../../../components/SignatureModal';
+import DownloadButton from '../../../components/DownloadButton';
 
 export default function DocumentDetails() {
   const params = useParams();
@@ -34,6 +35,11 @@ export default function DocumentDetails() {
   const [userHasSigned, setUserHasSigned] = useState(false);
   const [signingLoading, setSigningLoading] = useState(false);
   const [signerName, setSignerName] = useState('');
+  const [showEditAnimation, setShowEditAnimation] = useState(false);
+  const [showCollaboratorModal, setShowCollaboratorModal] = useState(false);
+  const [newCollaboratorEmail, setNewCollaboratorEmail] = useState('');
+  const [newCollaboratorRole, setNewCollaboratorRole] = useState<'counterparty' | 'viewer'>('viewer');
+  const [addingCollaborator, setAddingCollaborator] = useState(false);
   
   const documentId = Array.isArray(params.id) ? params.id[0] : params.id;
 
@@ -128,11 +134,11 @@ export default function DocumentDetails() {
     try {
       // Call LLM API to rewrite document
       const documentType = document.type;
-      const prompt = rewritePrompt || `Rewrite the ${getDocumentTypeLabel(documentType)} titled "${document.title}" with a different approach and structure. Maintain the same general purpose but improve clarity, reduce ambiguity, and strengthen legal protections. Include all standard sections appropriate for this type of document.`;
+      const prompt = rewritePrompt || `Rewrite ${getDocumentTypeLabel(documentType)} titled "${document.title}". Make it clearer, reduce ambiguity, and strengthen legal protections.`;
       
       // Create AbortController for timeout
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 45000); // 45 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
       try {
         const response = await fetch('/api/generate-document', {
@@ -190,6 +196,27 @@ export default function DocumentDetails() {
     if (document?.fullContent) {
       setEditedContent(document.fullContent);
       setIsEditing(true);
+      
+      // Activate animation
+      setShowEditAnimation(true);
+      
+      // Turn off animation after 3 seconds
+      setTimeout(() => {
+        setShowEditAnimation(false);
+      }, 3000);
+      
+      // Scroll to the document content section
+      setTimeout(() => {
+        const documentContentElement = window.document.getElementById('document-content-section');
+        if (documentContentElement) {
+          documentContentElement.scrollIntoView({ behavior: 'smooth' });
+        }
+        
+        // Add focus to the editor after scrolling
+        if (contentRef.current) {
+          contentRef.current.focus();
+        }
+      }, 100);
     }
   };
 
@@ -204,7 +231,7 @@ export default function DocumentDetails() {
         
         // Create AbortController for timeout
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 45000); // 45 second timeout
+        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
         
         try {
           const response = await fetch('/api/generate-document', {
@@ -213,7 +240,7 @@ export default function DocumentDetails() {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({ 
-              prompt: `Revise the following document according to these instructions: "${saveInstructions}".\n\nDOCUMENT:\n${editedContent}`,
+              prompt: `Revise document: ${saveInstructions}. Document: ${editedContent.substring(0, 5000)}`,
               documentType: document.type,
               title: document.title,
               isRewrite: true
@@ -304,6 +331,8 @@ export default function DocumentDetails() {
     setSelectedText('');
     setSelectionRange(null);
     setShowSelectionPopup(false);
+    setSaveInstructions('');
+    setShowEditAnimation(false);
   };
 
   // Function to handle text selection
@@ -345,12 +374,12 @@ export default function DocumentDetails() {
       
       // Create prompt with user instructions if provided
       const instructionPrefix = selectionInstructions.trim() 
-        ? `Rewrite the following text according to these instructions: "${selectionInstructions}".` 
-        : `Rewrite the following text to improve clarity, precision, and legal robustness while maintaining its original meaning:`;
+        ? `Improve this text: ${selectionInstructions}.` 
+        : `Improve this text for clarity and legal precision:`;
       
       // Create AbortController for timeout
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 second timeout
 
       try {
         // Call LLM API to rewrite selected portion
@@ -360,7 +389,7 @@ export default function DocumentDetails() {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ 
-            prompt: `${instructionPrefix} "${selectedText}"`,
+            prompt: `${instructionPrefix} "${selectedText.substring(0, 1000)}"`,
             documentType: document.type,
             title: document.title,
             isRewrite: true,
@@ -404,6 +433,33 @@ export default function DocumentDetails() {
 
   const openSignatureModal = () => {
     setShowSignatureModal(true);
+  };
+
+  const handleOpenCollaboratorModal = () => {
+    setShowCollaboratorModal(true);
+  };
+
+  const handleAddCollaborator = async () => {
+    if (!newCollaboratorEmail.trim() || !document) return;
+    
+    try {
+      setAddingCollaborator(true);
+      await addCollaborator(documentId, newCollaboratorEmail, newCollaboratorRole);
+      
+      // Refresh document data to show the new collaborator
+      const refreshedDoc = await getDocument(documentId);
+      setDocument(refreshedDoc);
+      
+      // Clear the form and close the modal
+      setNewCollaboratorEmail('');
+      setNewCollaboratorRole('viewer');
+      setShowCollaboratorModal(false);
+    } catch (err: any) {
+      console.error('Error adding collaborator:', err);
+      setError(`Failed to add collaborator: ${err.message || 'Unknown error'}`);
+    } finally {
+      setAddingCollaborator(false);
+    }
   };
 
   const handleSaveSignature = async (signatureData: string) => {
@@ -533,17 +589,7 @@ export default function DocumentDetails() {
                 Rewrite with AI
               </button>
               
-              <a 
-                href={`/api/download-document?id=${documentId}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full flex items-center justify-center px-3 py-2 text-sm font-medium text-white bg-indigo-600 rounded hover:bg-indigo-700"
-              >
-                <svg className="w-4 h-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
-                </svg>
-                Download Document
-              </a>
+              <DownloadButton documentId={documentId} className="w-full" />
               
               <button 
                 onClick={handleEditClick}
@@ -581,7 +627,10 @@ export default function DocumentDetails() {
             <div className="border-t border-gray-200 pt-4 mb-4">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-semibold text-gray-900">Collaborators</h3>
-                <button className="text-xs text-indigo-600 hover:text-indigo-800">
+                <button 
+                  onClick={handleOpenCollaboratorModal}
+                  className="text-xs text-indigo-600 hover:text-indigo-800"
+                >
                   Add
                 </button>
               </div>
@@ -627,7 +676,7 @@ export default function DocumentDetails() {
           )}
           
           {/* Document content */}
-          <div>
+          <div id="document-content-section">
             <h2 className="text-lg font-medium text-gray-900 mb-4">Document Content</h2>
             {document.fullContent ? (
               <div className="bg-white border border-gray-200 rounded-md">
@@ -638,9 +687,15 @@ export default function DocumentDetails() {
                         <LoadingIndicator size="small" message="AI is rewriting selected text..." />
                       </div>
                     )}
+                    <div className={`bg-yellow-50 px-6 py-2 border-b border-yellow-200 flex items-center ${showEditAnimation ? 'animate-pulse' : ''}`}>
+                      <svg className="w-5 h-5 text-yellow-600 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+                      </svg>
+                      <span className="text-sm font-medium text-yellow-800">Editing Mode: Changes will not be saved until you click "Save Changes"</span>
+                    </div>
                     <pre 
                       ref={contentRef}
-                      className="whitespace-pre-wrap text-sm p-6 outline-none min-h-[400px]" 
+                      className={`whitespace-pre-wrap text-sm p-6 outline-none min-h-[400px] border-2 ${showEditAnimation ? 'border-yellow-500' : 'border-yellow-300'} transition-colors duration-300`} 
                       contentEditable={true}
                       onMouseUp={handleTextSelection}
                       onKeyUp={handleTextSelection}
@@ -709,21 +764,27 @@ export default function DocumentDetails() {
                       <p className="mt-1 text-xs text-gray-500">
                         {saveInstructions.trim() 
                           ? "AI will process your document with these instructions before saving" 
-                          : "Leave empty to save without AI processing"}
+                          : "If left blank, your changes will be saved as-is without AI processing"}
                       </p>
                     </div>
                     
-                    <div className="flex justify-end mt-4 space-x-3 px-6 pb-6">
+                    <div className="flex justify-end space-x-4 mt-6 px-6 pb-6">
                       <button
                         onClick={cancelEditing}
-                        className="px-3 py-1 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50"
+                        className="flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
                       >
-                        Cancel
+                        <svg className="w-4 h-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                        Cancel Editing
                       </button>
                       <button
                         onClick={saveChanges}
-                        className="px-3 py-1 text-sm font-medium text-white bg-indigo-600 rounded hover:bg-indigo-700"
+                        className="flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
                       >
+                        <svg className="w-4 h-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                        </svg>
                         Save Changes
                       </button>
                     </div>
@@ -849,6 +910,82 @@ export default function DocumentDetails() {
           onSave={handleSaveSignature}
           title="Sign This Document"
         />
+      )}
+
+      {/* Add Collaborator Modal */}
+      {showCollaboratorModal && (
+        <div className="fixed inset-0 z-10 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+          <div className="flex items-end justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+            <div className="fixed inset-0 transition-opacity bg-gray-500 bg-opacity-75" aria-hidden="true" onClick={() => setShowCollaboratorModal(false)}></div>
+            <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+            <div className="inline-block overflow-hidden text-left align-bottom transition-all transform bg-white rounded-lg shadow-xl sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+              <div className="px-4 pt-5 pb-4 bg-white sm:p-6 sm:pb-4">
+                <div className="sm:flex sm:items-start">
+                  <div className="flex items-center justify-center flex-shrink-0 w-12 h-12 mx-auto bg-blue-100 rounded-full sm:mx-0 sm:h-10 sm:w-10">
+                    <svg className="w-6 h-6 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zM4 19.235v-.11a6.375 6.375 0 0112.75 0v.109A12.318 12.318 0 0110.374 21c-2.331 0-4.512-.645-6.374-1.766z" />
+                    </svg>
+                  </div>
+                  <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
+                    <h3 className="text-lg font-medium leading-6 text-gray-900" id="modal-title">
+                      Add Collaborator
+                    </h3>
+                    <div className="mt-2">
+                      <p className="text-sm text-gray-500 mb-4">
+                        Add a new collaborator to this document. They will receive an email notification.
+                      </p>
+                      <div className="mb-4">
+                        <label htmlFor="collaboratorEmail" className="block text-sm font-medium text-gray-700">
+                          Email Address
+                        </label>
+                        <input
+                          type="email"
+                          id="collaboratorEmail"
+                          value={newCollaboratorEmail}
+                          onChange={(e) => setNewCollaboratorEmail(e.target.value)}
+                          placeholder="Enter email address"
+                          className="block w-full mt-1 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="collaboratorRole" className="block text-sm font-medium text-gray-700">
+                          Role
+                        </label>
+                        <select
+                          id="collaboratorRole"
+                          value={newCollaboratorRole}
+                          onChange={(e) => setNewCollaboratorRole(e.target.value as 'counterparty' | 'viewer')}
+                          className="block w-full mt-1 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                        >
+                          <option value="viewer">Viewer (Read Only)</option>
+                          <option value="counterparty">Counterparty (Can Sign)</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="px-4 py-3 bg-gray-50 sm:px-6 sm:flex sm:flex-row-reverse">
+                <button
+                  type="button"
+                  disabled={addingCollaborator || !newCollaboratorEmail.trim()}
+                  onClick={handleAddCollaborator}
+                  className="inline-flex justify-center w-full px-4 py-2 text-base font-medium text-white bg-blue-600 border border-transparent rounded-md shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:ml-3 sm:w-auto sm:text-sm disabled:opacity-50"
+                >
+                  {addingCollaborator ? 'Adding...' : 'Add Collaborator'}
+                </button>
+                <button
+                  type="button"
+                  disabled={addingCollaborator}
+                  onClick={() => setShowCollaboratorModal(false)}
+                  className="inline-flex justify-center w-full px-4 py-2 mt-3 text-base font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
