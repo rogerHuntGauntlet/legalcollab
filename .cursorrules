@@ -1,0 +1,189 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "name": "Component Organization",
+      "description": "React components should be organized with imports first, interface definitions, component definition, and exports",
+      "pattern": "react component structure",
+      "severity": "warning"
+    },
+    {
+      "name": "Props Interface",
+      "description": "All React components must have explicitly defined Props interfaces",
+      "pattern": "component without Props interface",
+      "severity": "error"
+    },
+    {
+      "name": "No Any Types",
+      "description": "Avoid using 'any' type in TypeScript, use proper types instead",
+      "pattern": "\\bany\\b",
+      "severity": "error",
+      "include": ["**/*.ts", "**/*.tsx"]
+    },
+    {
+      "name": "Component Size",
+      "description": "Components should be under 300 lines for maintainability",
+      "pattern": "oversized component",
+      "severity": "warning"
+    },
+    {
+      "name": "Memoization",
+      "description": "Use React.memo for pure components and useMemo/useCallback for expensive calculations",
+      "pattern": "missing memoization",
+      "severity": "info"
+    },
+    {
+      "name": "File Naming Convention",
+      "description": "Component files must use PascalCase (Button.tsx), utility files must use camelCase (formatDate.ts)",
+      "pattern": "incorrect file naming",
+      "severity": "warning"
+    },
+    {
+      "name": "CSS Module Naming",
+      "description": "CSS modules should use kebab-case and end with .module.css",
+      "pattern": "^[a-z-]+\\.module\\.css$",
+      "severity": "warning",
+      "include": ["**/*.module.css"]
+    },
+    {
+      "name": "Component Naming",
+      "description": "React components should use PascalCase",
+      "pattern": "const [A-Z][a-zA-Z]+ = ",
+      "severity": "error",
+      "include": ["**/*.tsx"]
+    },
+    {
+      "name": "Function Naming",
+      "description": "Functions should use camelCase",
+      "pattern": "function [a-z][a-zA-Z]+ |const [a-z][a-zA-Z]+ = \\(",
+      "severity": "warning",
+      "include": ["**/*.ts", "**/*.tsx"]
+    },
+    {
+      "name": "Constants Naming",
+      "description": "Constants should use UPPER_SNAKE_CASE",
+      "pattern": "const [A-Z_]+ = ",
+      "severity": "info",
+      "include": ["**/*.ts", "**/*.tsx"]
+    },
+    {
+      "name": "Component Documentation",
+      "description": "Components should have JSDoc comments explaining their purpose",
+      "pattern": "/\\*\\*[\\s\\S]*?\\*/\\s*function [A-Z]|/\\*\\*[\\s\\S]*?\\*/\\s*const [A-Z]",
+      "severity": "info",
+      "include": ["**/*.tsx"]
+    },
+    {
+      "name": "Required Accessibility",
+      "description": "UI elements must have appropriate accessibility attributes",
+      "pattern": "<button[^>]*>|<input[^>]*>|<a[^>]*>",
+      "severity": "warning",
+      "include": ["**/*.tsx"]
+    },
+    {
+      "name": "Local State Management",
+      "description": "Prefer local state to global state when possible",
+      "pattern": "useContext|createContext",
+      "severity": "info",
+      "include": ["**/*.tsx"]
+    },
+    {
+      "name": "Firebase Best Practices",
+      "description": "Follow Firebase best practices for data reads/writes",
+      "pattern": "doc\\(|collection\\(|query\\(|getDoc\\(|getDocs\\(",
+      "severity": "info",
+      "include": ["**/*.ts", "**/*.tsx"]
+    },
+    {
+      "name": "LLM API Integration",
+      "description": "LLM API calls should include error handling and rate limiting",
+      "pattern": "openai|fetch\\(['\"]https://api\\.openai\\.com",
+      "severity": "warning",
+      "include": ["**/*.ts", "**/*.tsx"]
+    },
+    {
+      "name": "Security Practices",
+      "description": "Authentication and sensitive data handling must follow security best practices",
+      "pattern": "auth\\.|signIn|signOut|createUserWithEmailAndPassword",
+      "severity": "warning",
+      "include": ["**/*.ts", "**/*.tsx"]
+    },
+    {
+      "name": "Performance Optimization",
+      "description": "Ensure component rendering is optimized for performance",
+      "pattern": "useEffect\\(\\s*\\(\\)\\s*=>\\s*{",
+      "severity": "info",
+      "include": ["**/*.tsx"]
+    },
+    {
+      "name": "Required Comments",
+      "description": "Complex logic must be commented to improve maintainability",
+      "pattern": "for[\\s\\S]{50,}|if[\\s\\S]{50,}|switch[\\s\\S]{50,}",
+      "severity": "info",
+      "include": ["**/*.ts", "**/*.tsx"]
+    },
+    {
+      "name": "Project Structure",
+      "description": "Files should be organized in the standard project structure",
+      "pattern": "incorrect file location",
+      "severity": "warning"
+    }
+  ],
+  "ignorePatterns": [
+    "node_modules/**",
+    ".next/**",
+    "out/**",
+    "dist/**",
+    "build/**",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.spec.ts",
+    "**/*.spec.tsx"
+  ],
+  "customActions": [
+    {
+      "name": "Generate Component",
+      "description": "Create a new React component with TypeScript",
+      "command": "mkdir -p src/components/${1} && touch src/components/${1}/${1}.tsx src/components/${1}/${1}.module.css",
+      "args": [
+        {
+          "name": "componentName",
+          "description": "Name of the component (PascalCase)"
+        }
+      ]
+    },
+    {
+      "name": "Generate Page",
+      "description": "Create a new Next.js page component",
+      "command": "mkdir -p src/pages/${1} && touch src/pages/${1}/index.tsx",
+      "args": [
+        {
+          "name": "pagePath",
+          "description": "Path for the page (e.g., 'dashboard' or 'agreements/create')"
+        }
+      ]
+    },
+    {
+      "name": "Generate Hook",
+      "description": "Create a new custom React hook",
+      "command": "mkdir -p src/hooks && touch src/hooks/use${1}.ts",
+      "args": [
+        {
+          "name": "hookName",
+          "description": "Name of the hook (without 'use' prefix, PascalCase)"
+        }
+      ]
+    },
+    {
+      "name": "Generate Firebase Service",
+      "description": "Create a new Firebase service module",
+      "command": "mkdir -p src/services && touch src/services/${1}Service.ts",
+      "args": [
+        {
+          "name": "serviceName",
+          "description": "Name of the service (camelCase)"
+        }
+      ]
+    }
+  ]
+} 
